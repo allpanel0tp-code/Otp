@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>লগইন / সাইন আপ</title>
+<style>
+  :root { --bg:#f3f5fb; --card:#fff; --primary:#4f46e5; --primary-d:#4338ca; --text:#1f2937; --muted:#6b7280; --border:#d1d5db; --err:#dc2626; --ok:#16a34a; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans Bengali",sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .card { background:var(--card); width:100%; max-width:400px; border-radius:16px; padding:28px 24px; box-shadow:0 10px 30px rgba(0,0,0,.08); }
+  h1 { font-size:22px; text-align:center; margin-bottom:6px; }
+  .sub { text-align:center; color:var(--muted); font-size:14px; margin-bottom:20px; }
+  .tabs { display:flex; background:#eef0f6; border-radius:10px; padding:4px; margin-bottom:20px; }
+  .tab { flex:1; padding:10px; border:0; background:transparent; border-radius:8px; font-size:15px; font-weight:600; color:var(--muted); cursor:pointer; }
+  .tab.active { background:#fff; color:var(--primary); box-shadow:0 1px 4px rgba(0,0,0,.1); }
+  label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  input { width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:10px; font-size:16px; outline:none; }
+  input:focus { border-color:var(--primary); box-shadow:0 0 0 3px rgba(79,70,229,.15); }
+  .otp { letter-spacing:8px; text-align:center; font-size:22px; }
+  button.main { width:100%; margin-top:20px; padding:13px; border:0; border-radius:10px; background:var(--primary); color:#fff; font-size:16px; font-weight:600; cursor:pointer; }
+  button.main:hover { background:var(--primary-d); }
+  button.main:disabled { opacity:.6; cursor:not-allowed; }
+  button.link { background:none; border:0; color:var(--primary); font-size:14px; cursor:pointer; margin-top:14px; display:block; width:100%; text-align:center; }
+  .msg { margin-top:14px; font-size:14px; text-align:center; min-height:18px; }
+  .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
+  .hidden { display:none !important; }
+  .hint { font-size:12px; color:var(--muted); margin-top:6px; }
+  .avatar { width:64px; height:64px; border-radius:50%; background:var(--primary); color:#fff; font-size:28px; display:flex; align-items:center; justify-content:center; margin:0 auto 14px; }
+  .info { text-align:center; margin-bottom:6px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- Auth view -->
+  <div id="authView">
+    <h1>স্বাগতম 👋</h1>
+    <p class="sub">মোবাইল নাম্বারে ভেরিফাই কোড পাঠানো হবে</p>
+
+    <div class="tabs">
+      <button class="tab active" id="tabLogin" type="button">লগইন</button>
+      <button class="tab" id="tabSignup" type="button">সাইন আপ</button>
+    </div>
+
+    <!-- Step 1 -->
+    <form id="phoneForm">
+      <div id="nameWrap" class="hidden">
+        <label for="name">আপনার নাম</label>
+        <input id="name" type="text" placeholder="যেমন: রাকিব হাসান" autocomplete="name">
+      </div>
+
+      <label for="phone">মোবাইল নাম্বার</label>
+      <input id="phone" type="tel" placeholder="01XXXXXXXXX" autocomplete="tel" inputmode="tel">
+      <p class="hint">বাংলাদেশি নাম্বার লিখুন (01...) অথবা দেশের কোডসহ (+...)</p>
+
+      <button class="main" id="sendBtn" type="submit">কোড পাঠান</button>
+    </form>
+
+    <!-- Step 2 -->
+    <form id="otpForm" class="hidden">
+      <label for="otp">ভেরিফাই কোড</label>
+      <input id="otp" class="otp" type="text" inputmode="numeric" maxlength="6" placeholder="······" autocomplete="one-time-code">
+      <p class="hint" id="sentTo"></p>
+
+      <button class="main" id="verifyBtn" type="submit">ভেরিফাই করুন</button>
+      <button class="link" id="resendBtn" type="button">নাম্বার পরিবর্তন / আবার কোড পাঠান</button>
+    </form>
+
+    <p class="msg" id="msg"></p>
+    <div id="recaptcha-container"></div>
+  </div>
+
+  <!-- Logged-in view -->
+  <div id="homeView" class="hidden">
+    <div class="avatar" id="avatar">U</div>
+    <h1 id="welcome">স্বাগতম</h1>
+    <p class="sub" id="userPhone"></p>
+    <p class="info">আপনি সফলভাবে লগইন করেছেন ✅</p>
+    <button class="main" id="logoutBtn" type="button">লগআউট</button>
+  </div>
+
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+  import { getAnalytics, isSupported } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-analytics.js";
+  import {
+    getAuth, RecaptchaVerifier, signInWithPhoneNumber, updateProfile,
+    onAuthStateChanged, signOut, getAdditionalUserInfo
+  } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAWlFQaU4bddS-oe7GQMNJ2OIkyzG4EJa8",
+    authDomain: "test09-85e48.firebaseapp.com",
+    projectId: "test09-85e48",
+    storageBucket: "test09-85e48.firebasestorage.app",
+    messagingSenderId: "60904630784",
+    appId: "1:60904630784:web:ce6a72d3bb91e14aa806e5",
+    measurementId: "G-GJ3PZ1XW5S"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  try { if (await isSupported()) getAnalytics(app); } catch (e) { /* analytics optional */ }
+  const auth = getAuth(app);
+  auth.languageCode = "bn";
+
+  // ---------- elements ----------
+  const $ = (id) => document.getElementById(id);
+  const tabLogin = $("tabLogin"), tabSignup = $("tabSignup");
+  const nameWrap = $("nameWrap"), nameInput = $("name"), phoneInput = $("phone"), otpInput = $("otp");
+  const phoneForm = $("phoneForm"), otpForm = $("otpForm");
+  const sendBtn = $("sendBtn"), verifyBtn = $("verifyBtn"), resendBtn = $("resendBtn");
+  const msg = $("msg");
+
+  let mode = "login";
+  let confirmation = null;
+  let pendingName = "";
+  let recaptcha = null;
+
+  const show = (text, type = "") => { msg.textContent = text; msg.className = "msg " + type; };
+
+  // ---------- tabs ----------
+  function setMode(m) {
+    mode = m;
+    tabLogin.classList.toggle("active", m === "login");
+    tabSignup.classList.toggle("active", m === "signup");
+    nameWrap.classList.toggle("hidden", m === "login");
+    sendBtn.textContent = "কোড পাঠান";
+    resetSteps();
+    show("");
+  }
+  tabLogin.onclick = () => setMode("login");
+  tabSignup.onclick = () => setMode("signup");
+
+  function resetSteps() {
+    phoneForm.classList.remove("hidden");
+    otpForm.classList.add("hidden");
+    otpInput.value = "";
+    confirmation = null;
+  }
+
+  // ---------- phone helper ----------
+  function normalizePhone(raw) {
+    let p = raw.replace(/[\s\-()]/g, "");
+    if (p.startsWith("+")) return /^\+\d{8,15}$/.test(p) ? p : null;
+    if (p.startsWith("00")) p = "+" + p.slice(2);
+    else if (p.startsWith("880")) p = "+" + p;
+    else if (p.startsWith("01")) p = "+880" + p.slice(1);
+    else return null;
+    return /^\+8801\d{9}$/.test(p) ? p : null;
+  }
+
+  // ---------- recaptcha ----------
+  function setupRecaptcha() {
+    if (recaptcha) { try { recaptcha.clear(); } catch (e) {} }
+    $("recaptcha-container").innerHTML = "";
+    recaptcha = new RecaptchaVerifier(auth, "recaptcha-container", { size: "invisible" });
+  }
+
+  function errText(e) {
+    const map = {
+      "auth/invalid-phone-number": "নাম্বারটি সঠিক নয়।",
+      "auth/too-many-requests": "অনেকবার চেষ্টা করা হয়েছে, কিছুক্ষণ পর আবার চেষ্টা করুন।",
+      "auth/invalid-verification-code": "কোডটি ভুল হয়েছে।",
+      "auth/code-expired": "কোডের মেয়াদ শেষ, আবার কোড পাঠান।",
+      "auth/quota-exceeded": "SMS লিমিট শেষ হয়ে গেছে।",
+      "auth/captcha-check-failed": "reCAPTCHA ব্যর্থ হয়েছে, আবার চেষ্টা করুন।",
+      "auth/operation-not-allowed": "Firebase-এ Phone সাইন-ইন চালু করা নেই।",
+      "auth/unauthorized-domain": "এই ডোমেইন Firebase-এ অনুমোদিত নয় (Authorized domains-এ যোগ করুন)।",
+      "auth/network-request-failed": "ইন্টারনেট সংযোগ চেক করুন।"
+    };
+    return map[e.code] || ("সমস্যা হয়েছে: " + (e.code || e.message));
+  }
+
+  // ---------- send code ----------
+  phoneForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    show("");
+    pendingName = nameInput.value.trim();
+    if (mode === "signup" && pendingName.length < 2) return show("আপনার নাম লিখুন।", "err");
+
+    const phone = normalizePhone(phoneInput.value);
+    if (!phone) return show("সঠিক মোবাইল নাম্বার দিন।", "err");
+
+    sendBtn.disabled = true; sendBtn.textContent = "পাঠানো হচ্ছে...";
+    try {
+      setupRecaptcha();
+      confirmation = await signInWithPhoneNumber(auth, phone, recaptcha);
+      phoneForm.classList.add("hidden");
+      otpForm.classList.remove("hidden");
+      $("sentTo").textContent = phone + " নাম্বারে ৬ digit কোড পাঠানো হয়েছে।";
+      otpInput.focus();
+      show("কোড পাঠানো হয়েছে ✔", "ok");
+    } catch (err) {
+      console.error(err);
+      show(errText(err), "err");
+      try { recaptcha.clear(); } catch (x) {}
+    } finally {
+      sendBtn.disabled = false; sendBtn.textContent = "কোড পাঠান";
+    }
+  });
+
+  // ---------- verify code ----------
+  otpForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const code = otpInput.value.trim();
+    if (!/^\d{6}$/.test(code)) return show("৬ digit এর কোড দিন।", "err");
+
+    verifyBtn.disabled = true; verifyBtn.textContent = "যাচাই হচ্ছে...";
+    try {
+      const result = await confirmation.confirm(code);
+      const isNew = getAdditionalUserInfo(result)?.isNewUser;
+
+      if (mode === "signup" && pendingName) {
+        await updateProfile(result.user, { displayName: pendingName });
+      }
+      if (mode === "login" && isNew) {
+        show("এই নাম্বারে আগে অ্যাকাউন্ট ছিল না, নতুন অ্যাকাউন্ট তৈরি হয়েছে।", "ok");
+      } else if (mode === "signup" && !isNew) {
+        show("এই নাম্বারে আগেই অ্যাকাউন্ট ছিল, লগইন করা হয়েছে।", "ok");
+      } else {
+        show("");
+      }
+      renderUser(auth.currentUser);
+    } catch (err) {
+      console.error(err);
+      show(errText(err), "err");
+    } finally {
+      verifyBtn.disabled = false; verifyBtn.textContent = "ভেরিফাই করুন";
+    }
+  });
+
+  resendBtn.onclick = () => { resetSteps(); show(""); };
+
+  // ---------- session ----------
+  function renderUser(user) {
+    if (user) {
+      $("authView").classList.add("hidden");
+      $("homeView").classList.remove("hidden");
+      const name = user.displayName || "ব্যবহারকারী";
+      $("welcome").textContent = "স্বাগতম, " + name;
+      $("userPhone").textContent = user.phoneNumber || "";
+      $("avatar").textContent = name.trim().charAt(0).toUpperCase();
+    } else {
+      $("homeView").classList.add("hidden");
+      $("authView").classList.remove("hidden");
+    }
+  }
+  onAuthStateChanged(auth, renderUser);
+
+  $("logoutBtn").onclick = async () => {
+    await signOut(auth);
+    setMode("login");
+  };
+</script>
+</body>
+</html>
